@@ -1,7 +1,6 @@
 #!/bin/bash
 #
 # pilot2 wrapper used at CERN central pilot factories
-# NOTE: this is for pilot2, not the legacy pilot.py
 #
 # https://google.github.io/styleguide/shell.xml
 

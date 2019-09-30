@@ -1,10 +1,11 @@
 #!/bin/bash
 #
 # pilot2 wrapper used at CERN central pilot factories
+# NOTE: this is for pilot2, not the legacy pilot.py
 #
 # https://google.github.io/styleguide/shell.xml
 
-VERSION=20190930a-pilot2
+VERSION=20190930b-pilot2
 
 function err() {
   dt=$(date --utc +"%Y-%m-%d %H:%M:%S %Z [wrapper]")
@@ -143,22 +144,6 @@ function setup_local() {
   if [[ -f ${OSG_GRID}/setup.sh ]]; then
     log "Setting up OSG MW using ${OSG_GRID}/setup.sh"
     source ${OSG_GRID}/setup.sh
-  fi
-}
-
-function setup_shoal() {
-  log "will set FRONTIER_SERVER with shoal"
-  if [[ -n "${FRONTIER_SERVER}" ]] ; then
-    export FRONTIER_SERVER
-    log "call shoal frontier"
-    outputstr=`shoal-client -f`
-    log "result: $outputstr"
-
-    if [[ $? -eq 0 ]] ; then
-      export FRONTIER_SERVER=$outputstr
-    fi
-
-    log "set FRONTIER_SERVER = $FRONTIER_SERVER"
   fi
 }
 
@@ -376,12 +361,6 @@ function main() {
   setup_local
   echo
 
-  if [[ "${shoalflag}" == 'true' ]]; then
-    echo "--- Setup shoal ---"
-    setup_shoal
-    echo
-  fi
-
   echo "---- Proxy Information ----"
   if [[ ${tflag} == 'true' ]]; then
     log 'Skipping proxy checks due to -t flag'
@@ -400,7 +379,12 @@ function main() {
   echo
 
   echo "---- Ready to run pilot ----"
-  trap trap_handler SIGTERM SIGQUIT SIGSEGV SIGXCPU SIGUSR1 SIGBUS
+  trap 'trap_handler SIGTERM' SIGTERM
+  trap 'trap_handler SIGQUIT' SIGQUIT
+  trap 'trap_handler SIGSEGV' SIGSEGV
+  trap 'trap_handler SIGXCPU' SIGXCPU
+  trap 'trap_handler SIGUSR1' SIGUSR1
+  trap 'trap_handler SIGBUS' SIGBUS
   echo
 
   log "==== pilot stdout BEGIN ===="
@@ -463,7 +447,6 @@ jarg='managed'
 qarg=''
 rarg=''
 sarg=''
-shoalflag=false
 tflag='false'
 piloturl='http://pandaserver.cern.ch:25085/cache/pilot/pilot2.tar.gz'
 mute='false'
@@ -511,10 +494,6 @@ case $key in
     -s)
     sarg="$2"
     shift
-    shift
-    ;;
-    -S|--shoal)
-    shoalflag=true
     shift
     ;;
     -t)

@@ -5,7 +5,7 @@
 #
 # https://google.github.io/styleguide/shell.xml
 
-VERSION=20190930b-pilot2
+VERSION=20191007a-pilot2
 
 function err() {
   dt=$(date --utc +"%Y-%m-%d %H:%M:%S %Z [wrapper]")
@@ -198,7 +198,7 @@ function get_pilot() {
     fi
   fi
    
-  curl --connect-timeout 30 --max-time 180 -sS ${piloturl} | tar -xzf -
+  curl --connect-timeout 30 --max-time 180 -sSL ${piloturl} | tar -xzf -
   if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
     log "ERROR: pilot download failed: ${piloturl}"
     err "ERROR: pilot download failed: ${piloturl}"

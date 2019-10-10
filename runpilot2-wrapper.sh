@@ -5,7 +5,7 @@
 #
 # https://google.github.io/styleguide/shell.xml
 
-VERSION=20191007a-pilot2
+VERSION=20191010a-pilot2
 
 function err() {
   dt=$(date --utc +"%Y-%m-%d %H:%M:%S %Z [wrapper]")
@@ -103,11 +103,8 @@ function setup_alrb() {
     export ALRB_rucioVersion=testing
   fi
   if [[ ${iarg} == "ALRB" ]]; then
-    log 'ALRB pilot requested, setting ALRB env vars to testing'
-    export ALRB_asetupVersion=testing
-    export ALRB_xrootdVersion=testing
-    export ALRB_davixVersion=testing
-    export ALRB_rucioVersion=testing
+    log 'ALRB pilot requested, setting env var ALRB_adcTesting=YES'
+    export ALRB_adcTesting=YES
   fi
   export ATLAS_LOCAL_ROOT_BASE=${ATLAS_LOCAL_ROOT_BASE:-/cvmfs/atlas.cern.ch/repo/ATLASLocalRootBase}
   export ALRB_userMenuFmtSkip=YES
@@ -246,7 +243,8 @@ function apfmon_exiting() {
 function apfmon_fault() {
   [[ ${mute} == 'true' ]] && muted && return 0
 
-  out=$(curl -ksS --connect-timeout 10 --max-time 20 -d state=wrapperfault -d rc=$1 ${APFMON}/jobs/${APFFID}:${APFCID})
+  out=$(curl -ksS --connect-timeout 10 --max-time 20 -d state=wrapperfault -d rc=$1 \
+             ${APFMON}/jobs/${APFFID}:${APFCID})
   if [[ $? -eq 0 ]]; then
     log $out
   else

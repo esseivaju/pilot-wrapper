@@ -1,11 +1,10 @@
 #!/bin/bash
 #
 # pilot2 wrapper used at CERN central pilot factories
-# NOTE: this is for pilot2, not the legacy pilot.py
 #
 # https://google.github.io/styleguide/shell.xml
 
-VERSION=20191010a-pilot2
+VERSION=20191013a-pilot2
 
 function err() {
   dt=$(date --utc +"%Y-%m-%d %H:%M:%S %Z [wrapper]")
@@ -18,7 +17,8 @@ function log() {
 }
 
 function get_workdir {
-  if [[ ${piloturl} == 'local' ]]; then
+
+  if [[ ${piloturl} == 'local' -a ${harvesterflag} == 'false' ]]; then
     echo $(pwd)
     return 0
   fi
@@ -103,8 +103,11 @@ function setup_alrb() {
     export ALRB_rucioVersion=testing
   fi
   if [[ ${iarg} == "ALRB" ]]; then
-    log 'ALRB pilot requested, setting env var ALRB_adcTesting=YES'
-    export ALRB_adcTesting=YES
+    log 'ALRB pilot requested, setting ALRB env vars to testing'
+    export ALRB_asetupVersion=testing
+    export ALRB_xrootdVersion=testing
+    export ALRB_davixVersion=testing
+    export ALRB_rucioVersion=testing
   fi
   export ATLAS_LOCAL_ROOT_BASE=${ATLAS_LOCAL_ROOT_BASE:-/cvmfs/atlas.cern.ch/repo/ATLASLocalRootBase}
   export ALRB_userMenuFmtSkip=YES
@@ -144,6 +147,22 @@ function setup_local() {
   fi
 }
 
+function setup_shoal() {
+  log "will set FRONTIER_SERVER with shoal"
+  if [[ -n "${FRONTIER_SERVER}" ]] ; then
+    export FRONTIER_SERVER
+    log "call shoal frontier"
+    outputstr=`shoal-client -f`
+    log "result: $outputstr"
+
+    if [[ $? -eq 0 ]] ; then
+      export FRONTIER_SERVER=$outputstr
+    fi
+
+    log "set FRONTIER_SERVER = $FRONTIER_SERVER"
+  fi
+}
+
 function check_vomsproxyinfo() {
   out=$(voms-proxy-info --version 2>/dev/null)
   if [[ $? -eq 0 ]]; then
@@ -172,6 +191,11 @@ function pilot_cmd() {
 }
 
 function get_pilot() {
+
+  if [[ ${harvesterflag} == 'true' ]]; then
+      cp -v ../pilot2.tar.gz .
+  fi
+
   if [[ -f pilot2.tar.gz ]]; then
     tar -xzf pilot2.tar.gz
     if [ -f pilot2/pilot.py ]; then
@@ -195,7 +219,7 @@ function get_pilot() {
     fi
   fi
    
-  curl --connect-timeout 30 --max-time 180 -sSL ${piloturl} | tar -xzf -
+  curl --connect-timeout 30 --max-time 180 -sS ${piloturl} | tar -xzf -
   if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
     log "ERROR: pilot download failed: ${piloturl}"
     err "ERROR: pilot download failed: ${piloturl}"
@@ -243,8 +267,7 @@ function apfmon_exiting() {
 function apfmon_fault() {
   [[ ${mute} == 'true' ]] && muted && return 0
 
-  out=$(curl -ksS --connect-timeout 10 --max-time 20 -d state=wrapperfault -d rc=$1 \
-             ${APFMON}/jobs/${APFFID}:${APFCID})
+  out=$(curl -ksS --connect-timeout 10 --max-time 20 -d state=wrapperfault -d rc=$1 ${APFMON}/jobs/${APFFID}:${APFCID})
   if [[ $? -eq 0 ]]; then
     log $out
   else
@@ -335,8 +358,13 @@ function main() {
   printenv | sort
   # SITE_NAME env var is used downstream by rucio
   export SITE_NAME=${sarg}
-  export VO_ATLAS_SW_DIR='/cvmfs/atlas.cern.ch/repo/sw'
-  export ATLAS_LOCAL_ROOT_BASE='/cvmfs/atlas.cern.ch/repo/ATLASLocalRootBase'
+  if [[ ${containerflag} == 'true' ]]; then
+    log 'Skipping defining VO_ATLAS_SW_DIR due to --container flag'
+    log 'Skipping defining ATLAS_LOCAL_ROOT_BASE due to --container flag'
+  else
+      export VO_ATLAS_SW_DIR='/cvmfs/atlas.cern.ch/repo/sw'
+      export ATLAS_LOCAL_ROOT_BASE='/cvmfs/atlas.cern.ch/repo/ATLASLocalRootBase'
+  fi
   echo
   
   echo "---- Shell process limits ----"
@@ -348,16 +376,34 @@ function main() {
   echo
 
   echo "---- Check cvmfs area ----"
-  check_cvmfs
+  if [[ ${containerflag} == 'true' ]]; then
+    log 'Skipping Check cvmfs area due to --container flag'
+  else
+      check_cvmfs
+  fi
   echo
 
   echo "---- Setup ALRB ----"
-  setup_alrb
+  if [[ ${containerflag} == 'true' ]]; then
+    log 'Skipping Setup ALRB due to --container flag'
+  else
+      setup_alrb
+  fi
   echo
 
   echo "---- Setup local ATLAS ----"
-  setup_local
+  if [[ ${containerflag} == 'true' ]]; then
+    log 'Skipping Setup local ATLAS due to --container flag'
+  else
+      setup_local
+  fi
   echo
+
+  if [[ "${shoalflag}" == 'true' ]]; then
+    echo "--- Setup shoal ---"
+    setup_shoal
+    echo
+  fi
 
   echo "---- Proxy Information ----"
   if [[ ${tflag} == 'true' ]]; then
@@ -377,12 +423,7 @@ function main() {
   echo
 
   echo "---- Ready to run pilot ----"
-  trap 'trap_handler SIGTERM' SIGTERM
-  trap 'trap_handler SIGQUIT' SIGQUIT
-  trap 'trap_handler SIGSEGV' SIGSEGV
-  trap 'trap_handler SIGXCPU' SIGXCPU
-  trap 'trap_handler SIGUSR1' SIGUSR1
-  trap 'trap_handler SIGBUS' SIGBUS
+  trap trap_handler SIGTERM SIGQUIT SIGSEGV SIGXCPU SIGUSR1 SIGBUS
   echo
 
   log "==== pilot stdout BEGIN ===="
@@ -426,6 +467,8 @@ function main() {
 function usage () {
   echo "Usage: $0 -q <queue> -r <resource> -s <site> [<pilot_args>]"
   echo
+  echo "  --container Standalone container is being used "
+  echo "  --harvester pilot wrapper being launched from Harvester at HPC edge "
   echo "  -i,   pilot type, default PR"
   echo "  -j,   job type prodsourcelabel, default 'managed'"
   echo "  -q,   panda queue"
@@ -440,11 +483,14 @@ starttime=$(date +%s)
 
 # wrapper args are explicit if used in the wrapper
 # additional pilot2 args are passed as extra args
+containerflag='false'
+harvesterflag='false'
 iarg='PR'
 jarg='managed'
 qarg=''
 rarg=''
 sarg=''
+shoalflag=false
 tflag='false'
 piloturl='http://pandaserver.cern.ch:25085/cache/pilot/pilot2.tar.gz'
 mute='false'
@@ -458,6 +504,16 @@ case $key in
     -h|--help)
     usage
     shift
+    shift
+    ;;
+    --container)
+    containerflag='true'
+    shift
+    ;;
+    --harvester)
+    harvesterflag='true'
+    mute='true'
+    piloturl='local'
     shift
     ;;
     --mute)
@@ -492,6 +548,10 @@ case $key in
     -s)
     sarg="$2"
     shift
+    shift
+    ;;
+    -S|--shoal)
+    shoalflag=true
     shift
     ;;
     -t)

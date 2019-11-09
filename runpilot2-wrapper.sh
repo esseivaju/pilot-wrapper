@@ -4,7 +4,7 @@
 #
 # https://google.github.io/styleguide/shell.xml
 
-VERSION=20191013a-pilot2
+VERSION=20191106a-pilot2
 
 function err() {
   dt=$(date --utc +"%Y-%m-%d %H:%M:%S %Z [wrapper]")
@@ -18,11 +18,26 @@ function log() {
 
 function get_workdir {
 
-  if [[ ${piloturl} == 'local' -a ${harvesterflag} == 'false' ]]; then
+  if [[ ${piloturl} == 'local' && ${harvesterflag} == 'false' ]]; then
     echo $(pwd)
     return 0
   fi
-    
+
+  if [[ ${harvesterflag} == 'true' ]]; then
+      # test if Harvester WorkFlow is OneToMany aka "Jumbo" Jobs
+      if [[ ${workflowarg} == 'OneToMany' ]]; then
+	  if [[ -n ${!harvesterarg} ]]; then
+	      templ=$(pwd)/atlas_${!harvesterarg}
+	      mkdir ${templ}
+	      echo ${templ}
+	      return 0
+	  fi
+      else
+	  echo $(pwd)
+	  return 0
+      fi
+  fi
+
   if [[ -n ${OSG_WN_TMP} ]]; then
     templ=${OSG_WN_TMP}/atlas_XXXXXXXX
   elif [[ -n ${TMPDIR} ]]; then
@@ -163,6 +178,14 @@ function setup_shoal() {
   fi
 }
 
+function setup_harvester_symlinks() {
+  for datafile in `find ${HARVESTER_WORKDIR} -maxdepth 1 -type l -exec /usr/bin/readlink -e {} ';'`; do
+      symlinkname=$(basename $datafile)
+      ln -s $datafile $symlinkname
+  done      
+}
+
+
 function check_vomsproxyinfo() {
   out=$(voms-proxy-info --version 2>/dev/null)
   if [[ $? -eq 0 ]]; then
@@ -186,14 +209,24 @@ function check_arcproxy() {
 }
 
 function pilot_cmd() {
-  cmd="${pybin} pilot2/pilot.py -q ${qarg} -r ${rarg} -s ${sarg} -i ${iarg} -j ${jarg} --pilot-user=ATLAS ${pilotargs}"
+  # test if not harvester job 
+  if [[ ${harvesterflag} == 'false' ]] ; then  
+    cmd="${pybin} pilot2/pilot.py -q ${qarg} -r ${rarg} -s ${sarg} -i ${iarg} -j ${jarg} --pilot-user=ATLAS ${pilotargs}"
+  else
+    # check to see if we are running OneToMany Harvester workflow (aka Jumbo Jobs)
+    if [[ ${workflowarg} == 'OneToMany' ]] && [ -z ${HARVESTER_PILOT_WORKDIR+x} ] ; then
+      cmd="${pybin} pilot2/pilot.py -q ${qarg} -r ${rarg} -s ${sarg} -i ${iarg} -j ${jarg} -a ${HARVESTER_PILOT_WORKDIR} --pilot-user=atlashpc ${pilotargs}"
+    else
+      cmd="${pybin} pilot2/pilot.py -q ${qarg} -r ${rarg} -s ${sarg} -i ${iarg} -j ${jarg} --pilot-user=atlashpc ${pilotargs}"
+    fi
+  fi
   echo ${cmd}
 }
 
 function get_pilot() {
 
-  if [[ ${harvesterflag} == 'true' ]]; then
-      cp -v ../pilot2.tar.gz .
+  if [[ ${harvesterflag} == 'true' ]] && [[ ${workflowarg} == 'OneToMany' ]]; then
+    cp -v ${HARVESTER_WORK_DIR}/pilot2.tar.gz .
   fi
 
   if [[ -f pilot2.tar.gz ]]; then
@@ -342,6 +375,10 @@ function main() {
   fi
   log "cd ${workdir}"
   cd ${workdir}
+  if [[ ${harvesterflag} == 'true' ]]; then
+        export HARVESTER_PILOT_WORKDIR=${workdir}
+        log "Define HARVESTER_PILOT_WORKDIR : ${HARVESTER_PILOT_WORKDIR}"
+  fi
   echo
   
   echo "---- Retrieve pilot code ----"
@@ -362,8 +399,8 @@ function main() {
     log 'Skipping defining VO_ATLAS_SW_DIR due to --container flag'
     log 'Skipping defining ATLAS_LOCAL_ROOT_BASE due to --container flag'
   else
-      export VO_ATLAS_SW_DIR='/cvmfs/atlas.cern.ch/repo/sw'
-      export ATLAS_LOCAL_ROOT_BASE='/cvmfs/atlas.cern.ch/repo/ATLASLocalRootBase'
+    export VO_ATLAS_SW_DIR='/cvmfs/atlas.cern.ch/repo/sw'
+    export ATLAS_LOCAL_ROOT_BASE='/cvmfs/atlas.cern.ch/repo/ATLASLocalRootBase'
   fi
   echo
   
@@ -379,7 +416,7 @@ function main() {
   if [[ ${containerflag} == 'true' ]]; then
     log 'Skipping Check cvmfs area due to --container flag'
   else
-      check_cvmfs
+    check_cvmfs
   fi
   echo
 
@@ -387,7 +424,7 @@ function main() {
   if [[ ${containerflag} == 'true' ]]; then
     log 'Skipping Setup ALRB due to --container flag'
   else
-      setup_alrb
+    setup_alrb
   fi
   echo
 
@@ -395,10 +432,17 @@ function main() {
   if [[ ${containerflag} == 'true' ]]; then
     log 'Skipping Setup local ATLAS due to --container flag'
   else
-      setup_local
+    setup_local
   fi
   echo
 
+  if [[ ${harvesterflag} == 'true' ]]; then
+    echo "---- Create symlinks to input data ----"
+    log ' create to symlinks to input data from harvester info'
+    setup_harvester_symlinks
+    echo
+  fi
+    
   if [[ "${shoalflag}" == 'true' ]]; then
     echo "--- Setup shoal ---"
     setup_shoal
@@ -467,8 +511,8 @@ function main() {
 function usage () {
   echo "Usage: $0 -q <queue> -r <resource> -s <site> [<pilot_args>]"
   echo
-  echo "  --container Standalone container is being used "
-  echo "  --harvester pilot wrapper being launched from Harvester at HPC edge "
+  echo "  --container (Standalone container), file to source for release setup "
+  echo "  --harvester (Harvester at HPC edge), NodeID from HPC batch system "
   echo "  -i,   pilot type, default PR"
   echo "  -j,   job type prodsourcelabel, default 'managed'"
   echo "  -q,   panda queue"
@@ -484,7 +528,10 @@ starttime=$(date +%s)
 # wrapper args are explicit if used in the wrapper
 # additional pilot2 args are passed as extra args
 containerflag='false'
+containerarg=''
 harvesterflag='false'
+harvesterarg=''
+workflowarg=''
 iarg='PR'
 jarg='managed'
 qarg=''
@@ -508,12 +555,22 @@ case $key in
     ;;
     --container)
     containerflag='true'
+    #containerarg="$2"
+    #shift
     shift
     ;;
     --harvester)
     harvesterflag='true'
+    harvesterarg="$2"
     mute='true'
     piloturl='local'
+    shift
+    shift
+    ;;
+    --harvester_workflow)
+    harvesterflag='true'
+    workflowarg="$2"
+    shift
     shift
     ;;
     --mute)

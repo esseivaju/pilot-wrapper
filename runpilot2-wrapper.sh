@@ -51,7 +51,10 @@ function get_workdir {
 
 
 function check_python() {
-    pybin=$(which python)
+    pybin=/opt/lcg/LCG_87/Python/2.7.10/x86_64-slc6-gcc62-opt/bin/python
+    if [[ ! -f ""$pybin"" ]]; then
+      pybin=$(which python)
+    fi
     pyver=`$pybin -c "import sys; print '%03d%03d%03d' % sys.version_info[0:3]"`
     # check if native python version > 2.6.0
     if [ $pyver -ge 002006000 ] ; then
@@ -61,7 +64,7 @@ function check_python() {
       log "refactor: this site has native python < 2.6.0"
       err "warning: this site has native python < 2.6.0"
       log "Native python $pybin is old: $pyver"
-    
+
       # Oh dear, we're doomed...
       log "FATAL: Failed to find a compatible python, exiting"
       err "FATAL: Failed to find a compatible python, exiting"
@@ -97,7 +100,7 @@ function check_cvmfs() {
     sortie 1
   fi
 }
-  
+
 function check_tags() {
   if [ -e /cvmfs/atlas.cern.ch/repo/sw/tags ]; then
     echo "sha256sum /cvmfs/atlas.cern.ch/repo/sw/tags"
@@ -182,7 +185,7 @@ function setup_harvester_symlinks() {
   for datafile in `find ${HARVESTER_WORKDIR} -maxdepth 1 -type l -exec /usr/bin/readlink -e {} ';'`; do
       symlinkname=$(basename $datafile)
       ln -s $datafile $symlinkname
-  done      
+  done
 }
 
 
@@ -209,8 +212,8 @@ function check_arcproxy() {
 }
 
 function pilot_cmd() {
-  # test if not harvester job 
-  if [[ ${harvesterflag} == 'false' ]] ; then  
+  # test if not harvester job
+  if [[ ${harvesterflag} == 'false' ]] ; then
     cmd="${pybin} pilot2/pilot.py -q ${qarg} -r ${rarg} -s ${sarg} -i ${iarg} -j ${jarg} --pilot-user=ATLAS ${pilotargs}"
   else
     # check to see if we are running OneToMany Harvester workflow (aka Jumbo Jobs)
@@ -248,10 +251,10 @@ function get_pilot() {
     else
       log "Local pilot NOT found: $(pwd)/pilot2/pilot.py"
       err "Local pilot NOT found: $(pwd)/pilot2/pilot.py"
-      return 1 
+      return 1
     fi
   fi
-   
+
   curl --connect-timeout 30 --max-time 180 -sS ${piloturl} | tar -xzf -
   if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
     log "ERROR: pilot download failed: ${piloturl}"
@@ -328,7 +331,7 @@ function sortie() {
 
   duration=$(( $(date +%s) - ${starttime} ))
   log "wrapper ${state} ec=$ec, duration=${duration}"
-  
+
   if [[ ${mute} == 'true' ]]; then
     muted
   else
@@ -362,11 +365,11 @@ function main() {
     echo "/proc/version:" $(cat /proc/version)
   fi
   echo "lsb_release:" $(lsb_release -d 2>/dev/null)
-  
+
   myargs=$@
   echo "wrapper call: $0 $myargs"
   echo
-  
+
   echo "---- Enter workdir ----"
   workdir=$(get_workdir)
   if [[ -f pandaJobData.out ]]; then
@@ -380,7 +383,7 @@ function main() {
         log "Define HARVESTER_PILOT_WORKDIR : ${HARVESTER_PILOT_WORKDIR}"
   fi
   echo
-  
+
   echo "---- Retrieve pilot code ----"
   get_pilot
   if [[ $? -ne 0 ]]; then
@@ -390,7 +393,7 @@ function main() {
     sortie 1
   fi
   echo
-  
+
   echo "---- Initial environment ----"
   printenv | sort
   # SITE_NAME env var is used downstream by rucio
@@ -403,11 +406,11 @@ function main() {
     export ATLAS_LOCAL_ROOT_BASE='/cvmfs/atlas.cern.ch/repo/ATLASLocalRootBase'
   fi
   echo
-  
+
   echo "---- Shell process limits ----"
   ulimit -a
   echo
-  
+
   echo "---- Check python version ----"
   check_python
   echo
@@ -442,7 +445,7 @@ function main() {
     setup_harvester_symlinks
     echo
   fi
-    
+
   if [[ "${shoalflag}" == 'true' ]]; then
     echo "--- Setup shoal ---"
     setup_shoal
@@ -456,7 +459,7 @@ function main() {
     check_proxy
   fi
   echo
-  
+
   echo "---- Build pilot cmd ----"
   cmd=$(pilot_cmd)
   echo cmd: ${cmd}
@@ -479,7 +482,7 @@ function main() {
   log "==== pilot stdout END ===="
   log "==== wrapper stdout RESUME ===="
   log "Pilot exit status: $pilotrc"
-  
+
   # notify monitoring, job exiting, capture the pilot exit status
   if [[ -f STATUSCODE ]]; then
     scode=$(cat pilot2/STATUSCODE)
@@ -488,7 +491,7 @@ function main() {
   fi
   log "STATUSCODE: $scode"
   apfmon_exiting $scode
-  
+
   echo "---- find pandaIDs.out ----"
   ls -l ${workdir}/pilot2
   echo
@@ -501,7 +504,7 @@ function main() {
   if [[ ${piloturl} != 'local' ]]; then
       log "cleanup: rm -rf $workdir"
       rm -fr $workdir
-  else 
+  else
       log "Test setup, not cleaning"
   fi
 
